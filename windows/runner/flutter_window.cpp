@@ -1,0 +1,123 @@
+#include "flutter_window.h"
+
+#include <optional>
+#include <dwmapi.h>
+#include <flutter/standard_method_codec.h>
+
+#include "flutter/generated_plugin_registrant.h"
+
+FlutterWindow::FlutterWindow(const flutter::DartProject& project)
+    : project_(project) {}
+
+FlutterWindow::~FlutterWindow() {}
+
+bool FlutterWindow::OnCreate() {
+  if (!Win32Window::OnCreate()) {
+    return false;
+  }
+
+  RECT frame = GetClientArea();
+
+  // The size here must match the window dimensions to avoid unnecessary surface
+  // creation / destruction in the startup path.
+  flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
+      frame.right - frame.left, frame.bottom - frame.top, project_);
+  // Ensure that basic setup of the controller was successful.
+  if (!flutter_controller_->engine() || !flutter_controller_->view()) {
+    return false;
+  }
+  RegisterPlugins(flutter_controller_->engine());
+  theme_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "rimworld_launcher/appearance",
+      &flutter::StandardMethodCodec::GetInstance());
+  theme_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        const auto& method = call.method_name();
+        if (method == "minimize") {
+          ShowWindow(GetHandle(), SW_MINIMIZE);
+          result->Success();
+          return;
+        }
+        if (method == "close") {
+          result->Success();
+          PostMessage(GetHandle(), WM_CLOSE, 0, 0);
+          return;
+        }
+        if (method == "drag") {
+          ReleaseCapture();
+          POINT cursor{};
+          GetCursorPos(&cursor);
+          SendMessage(GetHandle(), WM_NCLBUTTONDOWN, HTCAPTION,
+                      MAKELPARAM(cursor.x, cursor.y));
+          result->Success();
+          return;
+        }
+        const auto* dark = call.arguments()
+            ? std::get_if<bool>(call.arguments()) : nullptr;
+        if (method == "setDark" && dark) {
+          dark_mode_ = *dark;
+          ApplyTheme(*dark);
+          result->Success();
+        } else {
+          result->NotImplemented();
+        }
+      });
+  SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  flutter_controller_->engine()->SetNextFrameCallback([&]() {
+    this->Show();
+  });
+
+  // Flutter can complete the first frame before the "show window" callback is
+  // registered. The following call ensures a frame is pending to ensure the
+  // window is shown. It is a no-op if the first frame hasn't completed yet.
+  flutter_controller_->ForceRedraw();
+
+  return true;
+}
+
+void FlutterWindow::OnDestroy() {
+  if (theme_channel_) {
+    theme_channel_->SetMethodCallHandler(nullptr);
+    theme_channel_.reset();
+  }
+  if (flutter_controller_) {
+    flutter_controller_ = nullptr;
+  }
+
+  Win32Window::OnDestroy();
+}
+
+LRESULT
+FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
+                              WPARAM const wparam,
+                              LPARAM const lparam) noexcept {
+  // Give Flutter, including plugins, an opportunity to handle window messages.
+  if (flutter_controller_) {
+    std::optional<LRESULT> result =
+        flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
+                                                      lparam);
+    if (result) {
+      return *result;
+    }
+  }
+
+  switch (message) {
+    case WM_DWMCOLORIZATIONCOLORCHANGED:
+      if (dark_mode_.has_value()) {
+        ApplyTheme(*dark_mode_);
+        return 0;
+      }
+      break;
+    case WM_FONTCHANGE:
+      flutter_controller_->engine()->ReloadSystemFonts();
+      break;
+  }
+
+  return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+}
+
+void FlutterWindow::ApplyTheme(bool dark) {
+  const BOOL enabled = dark;
+  DwmSetWindowAttribute(GetHandle(), 20, &enabled, sizeof(enabled));
+}

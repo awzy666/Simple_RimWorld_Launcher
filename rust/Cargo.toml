@@ -1,0 +1,30 @@
+[package]
+name = "rimworld_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = "1"
+flutter_rust_bridge = "=2.12.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "native-tls", "json", "gzip", "brotli"] }
+scraper = "0.24"
+roxmltree = "0.21"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+tempfile = "3"
+walkdir = "2"
+fs2 = "0.4"
+rfd = "0.15"
+windows-sys = {version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_JobObjects","Win32_System_Threading","Win32_Security", "Win32_System_Diagnostics_ToolHelp"] }
+dunce = "1"
+steamlocate = "2"
+wait-timeout = "0.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+
