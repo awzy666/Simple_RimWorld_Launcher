@@ -16,7 +16,10 @@ import 'package:rimworld_launcher/src/menu_motion.dart';
 class LibraryFixture extends Fake implements RustLibApi {
   bool populated = false;
   List<String>? lastSavedOrder;
-  String? lastSavedGame, lastSource;
+  String? lastSavedGame, lastSource, lastSteamcmdSource, chosenDirectory;
+  String gameUrl = '', steamcmdUrl = '';
+  int directoryChoices = 0;
+  final startedTasks = <TaskRequest>[];
   @override
   Future<ModOrder> crateApiModOrder({required String game}) async =>
       const ModOrder(
@@ -65,6 +68,19 @@ class LibraryFixture extends Fake implements RustLibApi {
   @override
   Future<void> crateApiSetGameUrl({required String url}) async {
     lastSource = url;
+    gameUrl = url;
+  }
+
+  @override
+  Future<void> crateApiSetSteamcmdUrl({required String url}) async {
+    lastSteamcmdSource = url;
+    steamcmdUrl = url;
+  }
+
+  @override
+  Future<String?> crateApiChooseDirectory() async {
+    directoryChoices++;
+    return chosenDirectory;
   }
 
   static const game = Game(
@@ -73,11 +89,12 @@ class LibraryFixture extends Fake implements RustLibApi {
     steam: false,
   );
   @override
-  Future<Library> crateApiLibrary() async => const Library(
+  Future<Library> crateApiLibrary() async => Library(
     games: [game],
     selected: r'G:\Games\RimWorld',
     steamcmd: r'G:\steamcmd.exe',
-    gameUrl: '',
+    gameUrl: gameUrl,
+    steamcmdUrl: steamcmdUrl,
   );
   @override
   Future<List<LocalMod>> crateApiListMods({required String game}) async => [
@@ -105,8 +122,13 @@ class LibraryFixture extends Fake implements RustLibApi {
         ),
   ];
   @override
-  Stream<TaskEvent> crateApiTask({required TaskRequest request}) =>
-      Stream.value(const TaskEvent(stage: '已完成', done: true, error: false));
+  Stream<TaskEvent> crateApiTask({required TaskRequest request}) {
+    startedTasks.add(request);
+    return Stream.value(
+      const TaskEvent(stage: '已完成', done: true, error: false),
+    );
+  }
+
   @override
   Future<SearchPage> crateApiSearchWorkshop({
     required String query,
@@ -131,7 +153,136 @@ class LibraryFixture extends Fake implements RustLibApi {
 void main() {
   final fixture = LibraryFixture();
   setUpAll(() => RustLib.initMock(api: fixture));
-  setUp(() => fixture.populated = false);
+  setUp(() {
+    fixture.populated = false;
+    fixture.gameUrl = fixture.steamcmdUrl = '';
+    fixture.lastSource = fixture.lastSteamcmdSource = fixture.chosenDirectory =
+        null;
+    fixture.directoryChoices = 0;
+    fixture.startedTasks.clear();
+  });
+
+  testWidgets('SteamCMD and game source editors persist independent URLs', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 550);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    fixture.gameUrl = 'https://example.com/game-preset.zip';
+    await tester.pumpWidget(const LauncherApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('top-menu-3')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('section-3-1')));
+    await tester.pumpAndSettle();
+    expect(find.text('从 Valve 安装'), findsNothing);
+    final steamSource = find.descendant(
+      of: find.byKey(const ValueKey('steamcmd-source-input')),
+      matching: find.byType(TextFormBox),
+    );
+    final gameSource = find.descendant(
+      of: find.byKey(const ValueKey('game-source-input')),
+      matching: find.byType(TextFormBox),
+    );
+    await tester.enterText(
+      steamSource,
+      '  https://example.com/steamcmd-custom.zip  ',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-steamcmd-source')));
+    await tester.pumpAndSettle();
+    expect(fixture.steamcmdUrl, 'https://example.com/steamcmd-custom.zip');
+    expect(fixture.gameUrl, 'https://example.com/game-preset.zip');
+    expect(fixture.lastSource, isNull);
+    await tester.ensureVisible(gameSource);
+    await tester.enterText(gameSource, 'https://example.com/game-custom.zip');
+    final saveGame = find.byKey(const ValueKey('save-game-source'));
+    await tester.ensureVisible(saveGame);
+    await tester.tap(saveGame);
+    await tester.pumpAndSettle();
+    expect(fixture.gameUrl, 'https://example.com/game-custom.zip');
+    expect(fixture.steamcmdUrl, 'https://example.com/steamcmd-custom.zip');
+    // A fresh app reads both saved values instead of a fixed Valve address.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(const LauncherApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('top-menu-3')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('section-3-1')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormBox>(steamSource).initialValue,
+      fixture.steamcmdUrl,
+    );
+    expect(
+      tester.widget<TextFormBox>(gameSource).initialValue,
+      fixture.gameUrl,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'SteamCMD installation requires a URL before choosing a destination',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 550);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(const LauncherApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('top-menu-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('section-3-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('install-steamcmd-source')));
+      await tester.pumpAndSettle();
+      expect(find.text('请在设置中填写并保存 SteamCMD ZIP 下载源'), findsOneWidget);
+      expect(fixture.directoryChoices, 0);
+      expect(
+        fixture.startedTasks.where((r) => r.kind == TaskKind.installSteamcmd),
+        isEmpty,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'SteamCMD installation uses its configured ZIP and chosen directory',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 550);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      fixture.steamcmdUrl = 'https://example.com/custom-steamcmd.zip';
+      fixture.chosenDirectory = r'C:\Test\SteamCMD';
+      await tester.pumpWidget(const LauncherApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('top-menu-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('section-3-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('install-steamcmd-source')));
+      await tester.pumpAndSettle();
+      expect(find.text('安装 SteamCMD？'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(ContentDialog),
+          matching: find.textContaining(fixture.steamcmdUrl),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('安装'));
+      await tester.pumpAndSettle();
+      final task = fixture.startedTasks.singleWhere(
+        (r) => r.kind == TaskKind.installSteamcmd,
+      );
+      expect(task.source, fixture.steamcmdUrl);
+      expect(task.target, fixture.chosenDirectory);
+      expect(fixture.directoryChoices, 1);
+      expect(fixture.gameUrl, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   for (final axis in [Axis.horizontal, Axis.vertical]) {
     testWidgets('$axis indicator extends to its target before retracting', (
@@ -664,10 +815,13 @@ void main() {
     await tester.tap(find.text('从网址安装'));
     await tester.pumpAndSettle();
     expect(find.byType(ContentDialog), findsNothing);
-    final source = find.byType(TextFormBox);
+    final source = find.descendant(
+      of: find.byKey(const ValueKey('game-source-input')),
+      matching: find.byType(TextFormBox),
+    );
     await tester.ensureVisible(source);
     await tester.enterText(source, 'https://example.com/rimworld.zip');
-    await tester.tap(find.text('保存下载源'));
+    await tester.tap(find.byKey(const ValueKey('save-game-source')));
     await tester.pumpAndSettle();
     expect(fixture.lastSource, 'https://example.com/rimworld.zip');
   });

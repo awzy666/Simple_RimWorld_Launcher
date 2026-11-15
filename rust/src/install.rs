@@ -18,7 +18,6 @@ use std::{
 };
 use wait_timeout::ChildExt;
 
-pub const STEAM_URL: &str = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip";
 static SCANS: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = LazyLock::new(Default::default);
 type Report<'a> = dyn Fn(String, Option<f64>) + 'a;
 pub fn cancel_scan(id: &str) {
@@ -146,6 +145,11 @@ fn validate_empty(target: &Path) -> Result<()> {
     Ok(())
 }
 pub(super) fn component(r: &TaskRequest, report: &Report) -> Result<()> {
+    ensure!(
+        !r.source.trim().is_empty(),
+        "请先在设置中填写并保存 ZIP 下载源"
+    );
+    storage::url(&r.source)?;
     let target = Path::new(&r.target);
     validate_empty(target)?;
     let steam = r.kind == TaskKind::InstallSteamcmd;
@@ -162,15 +166,7 @@ pub(super) fn component(r: &TaskRequest, report: &Report) -> Result<()> {
         .prefix(".rimlauncher-install-")
         .tempdir_in(parent)?;
     let archive = temp.path().join("download.zip");
-    download(
-        if steam && r.source.is_empty() {
-            STEAM_URL
-        } else {
-            &r.source
-        },
-        &archive,
-        report,
-    )?;
+    download(&r.source, &archive, report)?;
     report("正在解压并验证".into(), None);
     let extracted = temp.path().join("unpacked");
     extract(&archive, &extracted)?;
@@ -194,8 +190,8 @@ pub(super) fn component(r: &TaskRequest, report: &Report) -> Result<()> {
     );
     let candidate = &candidates[0];
     if steam {
-        report("正在初始化 SteamCMD".into(), None);
-        run_cmd(&candidate.join("steamcmd.exe"), &["+quit"], None, report)?;
+        report("正在初始化 SteamCMD（匿名登录）".into(), None);
+        run_cmd(&candidate.join("steamcmd.exe"), None, report)?;
         ensure!(
             candidate.join("steamclient.dll").is_file(),
             "SteamCMD 初始化未完成"
@@ -206,7 +202,7 @@ pub(super) fn component(r: &TaskRequest, report: &Report) -> Result<()> {
     if existed {
         fs::remove_dir(target)?;
     }
-    if let Err(e) = fs::rename(candidate, target) {
+    if let Err(e) = commit_component(candidate, target) {
         if existed {
             let _ = fs::create_dir(target);
         }
@@ -218,7 +214,31 @@ pub(super) fn component(r: &TaskRequest, report: &Report) -> Result<()> {
         catalog::register(&r.target).map(|_| ())
     }
 }
-fn run_cmd(exe: &Path, args: &[&str], item: Option<&str>, report: &Report) -> Result<()> {
+
+fn commit_component(source: &Path, target: &Path) -> io::Result<()> {
+    // Windows may briefly retain executable/directory handles after process exit.
+    // Retry only sharing/access errors; never replace an existing destination.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match fs::rename(source, target) {
+            Err(error)
+                if matches!(error.raw_os_error(), Some(5 | 32 | 33))
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            result => return result,
+        }
+    }
+}
+
+fn run_cmd(exe: &Path, item: Option<&str>, report: &Report) -> Result<()> {
+    // Neither installation nor Mod tasks accept login credentials or arbitrary commands.
+    let mut args = vec!["+login", "anonymous"];
+    if let Some(id) = item {
+        args.extend(["+workshop_download_item", "294100", id, "validate"]);
+    }
+    args.push("+quit");
     let mut output = tempfile::tempfile()?;
     let log = output.try_clone()?;
     let mut child = Command::new(exe)
@@ -303,21 +323,8 @@ pub(super) fn install_mod(r: &TaskRequest, report: &Report) -> Result<()> {
     let exe = discovery::cmd(Path::new(&r.steamcmd)).context("请先在设置中选择或安装 SteamCMD")?;
     report("等待 SteamCMD".into(), None);
     let _lock = storage::lock(&exe.to_string_lossy())?;
-    report("正在连接 Steam 创意工坊".into(), None);
-    run_cmd(
-        &exe,
-        &[
-            "+login",
-            "anonymous",
-            "+workshop_download_item",
-            "294100",
-            id,
-            "validate",
-            "+quit",
-        ],
-        Some(id),
-        report,
-    )?;
+    report("正在以匿名方式连接 Steam 创意工坊".into(), None);
+    run_cmd(&exe, Some(id), report)?;
     let source: PathBuf = exe
         .parent()
         .unwrap()

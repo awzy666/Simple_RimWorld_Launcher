@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1698390634;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 752485860;
 
 // Section: executor
 
@@ -572,6 +572,41 @@ fn wire__crate__api__set_steamcmd_impl(
         },
     )
 }
+fn wire__crate__api__set_steamcmd_url_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_steamcmd_url",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_url = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::set_steamcmd_url(api_url)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__task_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -723,11 +758,13 @@ impl SseDecode for crate::api::Library {
         let mut var_selected = <String>::sse_decode(deserializer);
         let mut var_steamcmd = <String>::sse_decode(deserializer);
         let mut var_gameUrl = <String>::sse_decode(deserializer);
+        let mut var_steamcmdUrl = <String>::sse_decode(deserializer);
         return crate::api::Library {
             games: var_games,
             selected: var_selected,
             steamcmd: var_steamcmd,
             game_url: var_gameUrl,
+            steamcmd_url: var_steamcmdUrl,
         };
     }
 }
@@ -1019,8 +1056,9 @@ fn pde_ffi_dispatcher_primary_impl(
         13 => wire__crate__api__select_game_impl(port, ptr, rust_vec_len, data_len),
         14 => wire__crate__api__set_game_url_impl(port, ptr, rust_vec_len, data_len),
         15 => wire__crate__api__set_steamcmd_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__task_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__uninstall_mod_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__set_steamcmd_url_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__task_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__uninstall_mod_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1064,6 +1102,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::Library {
             self.selected.into_into_dart().into_dart(),
             self.steamcmd.into_into_dart().into_dart(),
             self.game_url.into_into_dart().into_dart(),
+            self.steamcmd_url.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -1306,6 +1345,7 @@ impl SseEncode for crate::api::Library {
         <String>::sse_encode(self.selected, serializer);
         <String>::sse_encode(self.steamcmd, serializer);
         <String>::sse_encode(self.game_url, serializer);
+        <String>::sse_encode(self.steamcmd_url, serializer);
     }
 }
 

@@ -76,6 +76,153 @@ fn zip_install_existing_and_interrupted_download() -> Result<()> {
     Ok(())
 }
 #[test]
+fn component_sources_are_independent_and_old_settings_remain_readable() -> Result<()> {
+    let legacy: api::Library = serde_json::from_str(
+        r#"{"games":[],"selected":"","steamcmd":"existing/steamcmd.exe","game_url":"https://example.com/game.zip"}"#,
+    )?;
+    assert!(legacy.steamcmd_url.is_empty());
+    assert_eq!(legacy.steamcmd, "existing/steamcmd.exe");
+    catalog::set_url("https://example.com/game.zip")?;
+    catalog::set_cmd_url("https://example.com/tool.zip")?;
+    for invalid in [
+        "file:///C:/steamcmd.zip",
+        "ftp://example.com/tool.zip",
+        "not a URL",
+    ] {
+        assert!(catalog::set_cmd_url(invalid).is_err());
+    }
+    let saved = catalog::library()?;
+    assert_eq!(saved.game_url, "https://example.com/game.zip");
+    assert_eq!(saved.steamcmd_url, "https://example.com/tool.zip");
+    let persisted: api::Library = storage::read_json(&storage::data_dir()?.join("library.json"))?;
+    assert_eq!(persisted.steamcmd_url, saved.steamcmd_url);
+    catalog::set_url("https://example.com/new-game.zip")?;
+    assert_eq!(catalog::library()?.steamcmd_url, saved.steamcmd_url);
+    catalog::set_cmd_url("")?;
+    let persisted: api::Library = storage::read_json(&storage::data_dir()?.join("library.json"))?;
+    assert!(persisted.steamcmd_url.is_empty());
+    assert_eq!(persisted.game_url, "https://example.com/new-game.zip");
+    Ok(())
+}
+
+#[test]
+fn blank_steamcmd_source_uses_the_default_and_keeps_custom_sources() -> Result<()> {
+    assert_eq!(
+        catalog::DEFAULT_STEAMCMD_ZIP_URL,
+        "https://client-update.steamstatic.com/installer/steamcmd.zip"
+    );
+    // Old settings, including a previously saved blank value, acquire the default.
+    fs::write(
+        storage::data_dir()?.join("library.json"),
+        r#"{"games":[],"steamcmd_url":""}"#,
+    )?;
+    assert_eq!(
+        catalog::library()?.steamcmd_url,
+        catalog::default_steamcmd_url()
+    );
+    catalog::set_cmd_url("https://example.com/custom-tool.zip")?;
+    assert_eq!(
+        catalog::library()?.steamcmd_url,
+        "https://example.com/custom-tool.zip"
+    );
+    catalog::set_cmd_url("")?;
+    assert_eq!(
+        catalog::library()?.steamcmd_url,
+        catalog::default_steamcmd_url()
+    );
+    Ok(())
+}
+
+#[test]
+fn steamcmd_install_requires_a_source_and_rejects_a_game_archive() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let target = temp.path().join("not-created").join("SteamCMD");
+    for source in ["", "file:///C:/tool.zip"] {
+        let result = install::component(
+            &request(TaskKind::InstallSteamcmd, &target, source),
+            &|_, _| {},
+        );
+        assert!(result.is_err());
+        assert!(!target.parent().unwrap().exists());
+    }
+    let invalid_package = serve(archive()?, 0)?;
+    let result = install::component(
+        &request(TaskKind::InstallSteamcmd, &target, &invalid_package),
+        &|_, _| {},
+    );
+    assert!(result.is_err());
+    assert!(!target.exists());
+    Ok(())
+}
+
+#[test]
+fn configured_steamcmd_source_installs_and_initializes_a_nested_zip() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let fixture = temp.path().join("tool_probe.rs");
+    fs::write(
+        &fixture,
+        r#"fn main() {
+        let args = std::env::args().skip(1).collect::<Vec<_>>();
+        std::fs::write("last-arguments.txt", args.join("\n")).unwrap();
+        std::fs::write("steamclient.dll", b"initialized fixture").unwrap();
+        if let Some(command) = args.iter().position(|arg| arg == "+workshop_download_item") {
+            let id = &args[command + 2];
+            let about = std::path::Path::new("steamapps/workshop/content/294100").join(id).join("About");
+            std::fs::create_dir_all(&about).unwrap();
+            std::fs::write(about.join("About.xml"), "<ModMetaData><name>Fixture Mod</name><packageId>fixture.anonymous</packageId></ModMetaData>").unwrap();
+            println!("Success. Downloaded item {id} to fixture cache");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }"#,
+    )?;
+    let executable = temp.path().join("steamcmd.exe");
+    let status = std::process::Command::new("rustc")
+        .arg(&fixture)
+        .arg("-o")
+        .arg(&executable)
+        .status()?;
+    anyhow::ensure!(status.success(), "could not compile SteamCMD fixture");
+    let mut zip = zip::ZipWriter::new(Cursor::new(vec![]));
+    zip.start_file(
+        "outer/tool/steamcmd.exe",
+        zip::write::SimpleFileOptions::default(),
+    )?;
+    zip.write_all(&fs::read(executable)?)?;
+    let source = serve(zip.finish()?.into_inner(), 0)?;
+    catalog::set_url("https://example.com/game.zip")?;
+    catalog::set_cmd_url(&source)?;
+    let target = temp.path().join("installed-tool");
+    install::component(
+        &request(TaskKind::InstallSteamcmd, &target, &source),
+        &|_, _| {},
+    )?;
+    assert_eq!(
+        fs::read(target.join("steamclient.dll"))?,
+        b"initialized fixture"
+    );
+    assert_eq!(
+        fs::read_to_string(target.join("last-arguments.txt"))?,
+        "+login\nanonymous\n+quit"
+    );
+    let saved = catalog::library()?;
+    assert_eq!(
+        saved.steamcmd,
+        target.join("steamcmd.exe").display().to_string()
+    );
+    assert_eq!(saved.steamcmd_url, source);
+    assert_eq!(saved.game_url, "https://example.com/game.zip");
+    let game_path = game(&temp.path().join("Game"))?;
+    let mut task = request(TaskKind::InstallMod, Path::new(&game_path), "1234567");
+    task.steamcmd = saved.steamcmd;
+    install::install_mod(&task, &|_, _| {})?;
+    assert_eq!(
+        fs::read_to_string(target.join("last-arguments.txt"))?,
+        "+login\nanonymous\n+workshop_download_item\n294100\n1234567\nvalidate\n+quit"
+    );
+    assert_eq!(localmods::list(&game_path)?.len(), 1);
+    Ok(())
+}
+#[test]
 fn steam_libraries_and_selection() -> Result<()> {
     let t = tempfile::tempdir()?;
     let steam = t.path().join("Steam");
@@ -213,11 +360,16 @@ fn local_discovery() -> Result<()> {
 #[test]
 #[ignore = "live Steam services, fresh temporary SteamCMD and test game only"]
 fn live_workshop_lifecycle() -> Result<()> {
+    let steamcmd_source = std::env::var("RIMWORLD_STEAMCMD_ZIP_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or_else(|| catalog::default_steamcmd_url().to_owned());
     let temp = tempfile::tempdir()?;
     let target = temp.path().join("SteamCMD");
-    install::component(&request(TaskKind::InstallSteamcmd, &target, ""), &|s, _| {
-        println!("{s}")
-    })?;
+    install::component(
+        &request(TaskKind::InstallSteamcmd, &target, &steamcmd_source),
+        &|s, _| println!("{s}"),
+    )?;
     let page = workshop::search("Smart Speed", 1)?;
     assert!(page.has_next);
     let item = page

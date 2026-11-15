@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1698390634;
+  int get rustContentHash => 752485860;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -123,6 +123,8 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSetGameUrl({required String url});
 
   Future<void> crateApiSetSteamcmd({required String path});
+
+  Future<void> crateApiSetSteamcmdUrl({required String url});
 
   Stream<TaskEvent> crateApiTask({required TaskRequest request});
 
@@ -588,6 +590,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "set_steamcmd", argNames: ["path"]);
 
   @override
+  Future<void> crateApiSetSteamcmdUrl({required String url}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(url, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiSetSteamcmdUrlConstMeta,
+        argValues: [url],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSetSteamcmdUrlConstMeta =>
+      const TaskConstMeta(debugName: "set_steamcmd_url", argNames: ["url"]);
+
+  @override
   Stream<TaskEvent> crateApiTask({required TaskRequest request}) {
     final sink = RustStreamSink<TaskEvent>();
     unawaited(
@@ -600,7 +630,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 16,
+              funcId: 17,
               port: port_,
             );
           },
@@ -634,7 +664,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 18,
             port: port_,
           );
         },
@@ -725,13 +755,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Library dco_decode_library(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return Library(
       games: dco_decode_list_game(arr[0]),
       selected: dco_decode_String(arr[1]),
       steamcmd: dco_decode_String(arr[2]),
       gameUrl: dco_decode_String(arr[3]),
+      steamcmdUrl: dco_decode_String(arr[4]),
     );
   }
 
@@ -999,11 +1030,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_selected = sse_decode_String(deserializer);
     var var_steamcmd = sse_decode_String(deserializer);
     var var_gameUrl = sse_decode_String(deserializer);
+    var var_steamcmdUrl = sse_decode_String(deserializer);
     return Library(
       games: var_games,
       selected: var_selected,
       steamcmd: var_steamcmd,
       gameUrl: var_gameUrl,
+      steamcmdUrl: var_steamcmdUrl,
     );
   }
 
@@ -1329,6 +1362,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.selected, serializer);
     sse_encode_String(self.steamcmd, serializer);
     sse_encode_String(self.gameUrl, serializer);
+    sse_encode_String(self.steamcmdUrl, serializer);
   }
 
   @protected

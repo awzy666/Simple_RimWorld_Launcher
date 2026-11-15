@@ -46,6 +46,9 @@ Future<void> setSteamcmd({required String path}) =>
 Future<void> setGameUrl({required String url}) =>
     RustLib.instance.api.crateApiSetGameUrl(url: url);
 
+Future<void> setSteamcmdUrl({required String url}) =>
+    RustLib.instance.api.crateApiSetSteamcmdUrl(url: url);
+
 Future<void> launchGame({required String path}) =>
     RustLib.instance.api.crateApiLaunchGame(path: path);
 
@@ -102,12 +105,14 @@ class Library {
   final String selected;
   final String steamcmd;
   final String gameUrl;
+  final String steamcmdUrl;
 
   const Library({
     required this.games,
     required this.selected,
     required this.steamcmd,
     required this.gameUrl,
+    required this.steamcmdUrl,
   });
 
   static Future<Library> default_() =>
@@ -115,7 +120,11 @@ class Library {
 
   @override
   int get hashCode =>
-      games.hashCode ^ selected.hashCode ^ steamcmd.hashCode ^ gameUrl.hashCode;
+      games.hashCode ^
+      selected.hashCode ^
+      steamcmd.hashCode ^
+      gameUrl.hashCode ^
+      steamcmdUrl.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -125,7 +134,8 @@ class Library {
           games == other.games &&
           selected == other.selected &&
           steamcmd == other.steamcmd &&
-          gameUrl == other.gameUrl;
+          gameUrl == other.gameUrl &&
+          steamcmdUrl == other.steamcmdUrl;
 }
 
 class LocalMod {

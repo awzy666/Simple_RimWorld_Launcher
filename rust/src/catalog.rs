@@ -4,6 +4,16 @@ use crate::{
 };
 use anyhow::{ensure, Context, Result};
 use std::{path::Path, process::Command};
+
+pub const DEFAULT_STEAMCMD_ZIP_URL: &str =
+    "https://client-update.steamstatic.com/installer/steamcmd.zip";
+
+pub fn default_steamcmd_url() -> &'static str {
+    option_env!("RIMWORLD_STEAMCMD_ZIP_URL")
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .unwrap_or(DEFAULT_STEAMCMD_ZIP_URL)
+}
 fn change<T>(f: impl FnOnce(&mut Library) -> Result<T>) -> Result<T> {
     let _guard = storage::lock("settings")?;
     let file = storage::data_dir()?.join("library.json");
@@ -19,6 +29,9 @@ pub fn library() -> Result<Library> {
         state.game_url = option_env!("RIMWORLD_GAME_ZIP_URL")
             .unwrap_or("")
             .to_owned();
+    }
+    if state.steamcmd_url.is_empty() {
+        state.steamcmd_url = default_steamcmd_url().to_owned();
     }
     Ok(state)
 }
@@ -80,6 +93,15 @@ pub fn set_url(url: &str) -> Result<()> {
     }
     change(|s| {
         s.game_url = url.to_owned();
+        Ok(())
+    })
+}
+pub fn set_cmd_url(url: &str) -> Result<()> {
+    if !url.is_empty() {
+        storage::url(url)?;
+    }
+    change(|s| {
+        s.steamcmd_url = url.to_owned();
         Ok(())
     })
 }

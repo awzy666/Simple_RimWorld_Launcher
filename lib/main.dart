@@ -124,10 +124,12 @@ class _LibraryWindowState extends State<LibraryWindow> {
     selected: '',
     steamcmd: '',
     gameUrl: '',
+    steamcmdUrl: '',
   );
   List<core.LocalMod> mods = [];
-  String? gameSourceDraft;
+  String? gameSourceDraft, steamcmdSourceDraft;
   final downloadSourceKey = GlobalKey();
+  final steamcmdSourceKey = GlobalKey();
   int revision = 0, serial = 0;
   int get page => widget.page;
   final sections = [0, 0, 0, 0];
@@ -287,12 +289,13 @@ class _LibraryWindowState extends State<LibraryWindow> {
     await refresh();
   });
   Future<void> installComponent(bool cmd) => guard(() async {
-    final url = cmd ? '' : library.gameUrl;
-    if (!cmd && url.isEmpty) {
+    final url = cmd ? library.steamcmdUrl : library.gameUrl;
+    if (url.isEmpty) {
       navigate(3, 1);
-      message('请在设置中填写并保存游戏 ZIP 下载源', error: true);
+      message('请在设置中填写并保存${cmd ? ' SteamCMD' : '游戏'} ZIP 下载源', error: true);
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        final sourceContext = downloadSourceKey.currentContext;
+        final sourceContext =
+            (cmd ? steamcmdSourceKey : downloadSourceKey).currentContext;
         if (sourceContext != null) Scrollable.ensureVisible(sourceContext);
       });
       return;
@@ -323,7 +326,7 @@ class _LibraryWindowState extends State<LibraryWindow> {
     final yes = await confirm(
       context,
       cmd ? '安装 SteamCMD？' : '安装 RimWorld？',
-      '安装目录\n$dir\n\n下载源\n${cmd ? 'Valve · steamcmd.zip' : url}',
+      '安装目录\n$dir\n\n下载源\n$url',
       '安装',
     );
     if (yes) {
@@ -366,8 +369,14 @@ class _LibraryWindowState extends State<LibraryWindow> {
     if (mounted) setState(() => launching = false);
   }
 
-  Future<void> saveSource() async {
-    await core.setGameUrl(url: (gameSourceDraft ?? library.gameUrl).trim());
+  Future<void> saveSource({bool cmd = false}) async {
+    if (cmd) {
+      await core.setSteamcmdUrl(
+        url: (steamcmdSourceDraft ?? library.steamcmdUrl).trim(),
+      );
+    } else {
+      await core.setGameUrl(url: (gameSourceDraft ?? library.gameUrl).trim());
+    }
     await refresh();
   }
 
@@ -721,7 +730,7 @@ class _LibraryWindowState extends State<LibraryWindow> {
                       message: library.steamcmd,
                       child: Text(
                         library.steamcmd.isEmpty
-                            ? '选择已有工具或从 Valve 安装。'
+                            ? '选择已有工具，或在设置中配置 ZIP 下载源。'
                             : library.steamcmd,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -914,6 +923,7 @@ class _LibraryWindowState extends State<LibraryWindow> {
       children: [
         heading('下载与工具', '配置 SteamCMD 和游戏 ZIP 直链。'),
         Panel(
+          key: steamcmdSourceKey,
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -927,23 +937,55 @@ class _LibraryWindowState extends State<LibraryWindow> {
                     library.steamcmd.isEmpty ? '未配置' : '已配置',
                     selected: library.steamcmd.isNotEmpty,
                   ),
+                  const SizedBox(width: 12),
+                  ActionButton(onPressed: chooseCmd, child: const Text('选择目录')),
                 ],
               ),
               const SizedBox(height: 8),
               SelectableText(
                 library.steamcmd.isEmpty
-                    ? '选择已有工具目录，或下载 Valve 官方版本。'
+                    ? '选择已有工具目录，或填写下方 ZIP 下载源后安装。'
                     : library.steamcmd,
                 style: t.typography.caption,
               ),
               const SizedBox(height: 12),
+              Text('SteamCMD ZIP 下载源', style: t.typography.caption),
+              const SizedBox(height: 6),
+              SizedBox(
+                key: const ValueKey('steamcmd-source-input'),
+                height: controlHeight,
+                child: TextFormBox(
+                  key: ValueKey('steamcmd-url-${library.steamcmdUrl}'),
+                  initialValue: library.steamcmdUrl,
+                  decoration: inputDecoration(context),
+                  placeholder: 'HTTP 或 HTTPS ZIP 直链',
+                  style: const TextStyle(fontSize: 14, height: 1.2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  onChanged: (value) => steamcmdSourceDraft = value,
+                ),
+              ),
+              const SizedBox(height: 12),
               Row(
                 children: [
-                  ActionButton(onPressed: chooseCmd, child: const Text('选择目录')),
+                  ActionButton.primary(
+                    key: const ValueKey('save-steamcmd-source'),
+                    onPressed: () => guard(() async {
+                      await saveSource(cmd: true);
+                      message('SteamCMD 下载源已保存');
+                    }),
+                    child: const Text('保存下载源'),
+                  ),
                   const SizedBox(width: 8),
                   ActionButton(
-                    onPressed: () => installComponent(true),
-                    child: const Text('从 Valve 安装'),
+                    key: const ValueKey('install-steamcmd-source'),
+                    onPressed: () => guard(() async {
+                      await saveSource(cmd: true);
+                      await installComponent(true);
+                    }),
+                    child: const Text('下载并安装'),
                   ),
                 ],
               ),
@@ -960,6 +1002,7 @@ class _LibraryWindowState extends State<LibraryWindow> {
               Text('游戏 ZIP 下载源', style: t.typography.bodyStrong),
               const SizedBox(height: 8),
               SizedBox(
+                key: const ValueKey('game-source-input'),
                 height: controlHeight,
                 child: TextFormBox(
                   key: ValueKey(library.gameUrl),
@@ -978,6 +1021,7 @@ class _LibraryWindowState extends State<LibraryWindow> {
               Row(
                 children: [
                   ActionButton.primary(
+                    key: const ValueKey('save-game-source'),
                     onPressed: () => guard(() async {
                       await saveSource();
                       message('下载源已保存');
@@ -986,6 +1030,7 @@ class _LibraryWindowState extends State<LibraryWindow> {
                   ),
                   const SizedBox(width: 8),
                   ActionButton(
+                    key: const ValueKey('install-game-source'),
                     onPressed: () => guard(() async {
                       await saveSource();
                       await installComponent(false);

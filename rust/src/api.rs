@@ -16,6 +16,7 @@ pub struct Library {
     pub selected: String,
     pub steamcmd: String,
     pub game_url: String,
+    pub steamcmd_url: String,
 }
 
 #[derive(Clone, Debug)]
@@ -118,6 +119,9 @@ pub fn set_steamcmd(path: String) -> Result<()> {
 }
 pub fn set_game_url(url: String) -> Result<()> {
     crate::catalog::set_url(&url)
+}
+pub fn set_steamcmd_url(url: String) -> Result<()> {
+    crate::catalog::set_cmd_url(&url)
 }
 pub fn launch_game(path: String) -> Result<()> {
     crate::catalog::launch(&path)

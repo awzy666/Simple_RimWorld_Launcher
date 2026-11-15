@@ -1,7 +1,7 @@
 name: rimworld_launcher
 description: Windows desktop library and Workshop manager for RimWorld.
 publish_to: none
-version: 0.4.2+8
+version: 0.4.4+10
 
 environment:
   sdk: ^3.14.0
